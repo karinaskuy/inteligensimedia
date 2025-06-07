@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import datetime
 
+pip install -r requirements.txt
+
 # --- Konfigurasi Halaman ---
 st.set_page_config(
     page_title="Interactive Media Intelligence Dashboard",
