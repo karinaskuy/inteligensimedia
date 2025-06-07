@@ -22,6 +22,7 @@ def clean_data(df_raw):
     """
     df = df_raw.copy() # Bekerja dengan salinan untuk menghindari SettingWithCopyWarning
 
+    # Memeriksa dan membersihkan kolom 'Date'
     if 'Date' in df.columns:
         # Mengonversi 'Date' ke datetime, memaksa error menjadi NaT
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
@@ -31,20 +32,21 @@ def clean_data(df_raw):
         st.error("Kolom 'Date' tidak ditemukan dalam file CSV Anda. Mohon periksa format CSV.")
         return pd.DataFrame() # Mengembalikan DataFrame kosong jika kolom penting tidak ada
 
+    # Memeriksa dan membersihkan kolom 'Engagements'
     if 'Engagements' in df.columns:
         # Mengonversi 'Engagements' ke numerik, mengisi NaN dengan 0, lalu ke integer
         df['Engagements'] = pd.to_numeric(df['Engagements'], errors='coerce').fillna(0).astype(int)
     else:
-        st.error("Kolom 'Engagements' tidak ditemukan dalam file CSV Anda. Mengisi dengan 0.")
+        st.warning("Kolom 'Engagements' tidak ditemukan dalam file CSV Anda. Mengisi dengan 0.")
         df['Engagements'] = 0 # Tambahkan kolom Engagements jika tidak ada dan isi dengan 0
 
-    # Pastikan kolom-kolom lain yang diharapkan ada
+    # Pastikan kolom-kolom lain yang diharapkan ada untuk filter dan visualisasi
+    # Jika tidak ada, tambahkan dengan nilai default agar aplikasi tidak crash
     required_cols = ['Platform', 'Sentiment', 'MediaType', 'Location']
     for col in required_cols:
         if col not in df.columns:
             st.warning(f"Kolom '{col}' tidak ditemukan. Beberapa visualisasi mungkin tidak berfungsi dengan benar.")
-            # st.write(f"Menambahkan kolom '{col}' dengan nilai default kosong.")
-            df[col] = "Tidak Diketahui" # Memberikan nilai default agar tidak error
+            df[col] = "Tidak Diketahui" # Memberikan nilai default
 
     return df
 
@@ -56,23 +58,38 @@ def create_chart(chart_type, df_chart, x=None, y=None, names=None, title="", col
     fig = None
     try:
         if chart_type == "pie":
-            fig = px.pie(df_chart, names=names, title=title, hole=0.4,
-                         color_discrete_sequence=px.colors.qualitative.Pastel) # Menggunakan Pastel dari Plotly
+            # Memastikan kolom 'names' ada dan tidak kosong
+            if names in df_chart.columns and not df_chart.empty and df_chart[names].count() > 0:
+                fig = px.pie(df_chart, names=names, title=title, hole=0.4,
+                             color_discrete_sequence=px.colors.qualitative.Pastel)
+            else:
+                st.info(f"Tidak ada data yang cukup untuk membuat grafik pie '{title}'.")
+                return
         elif chart_type == "line":
-            if sort_values:
-                df_chart = df_chart.sort_values(by=x)
-            fig = px.line(df_chart, x=x, y=y, title=title, markers=True,
-                          color_discrete_sequence=px.colors.qualitative.Pastel)
+            # Memastikan kolom 'x' dan 'y' ada dan tidak kosong
+            if x in df_chart.columns and y in df_chart.columns and not df_chart.empty and df_chart[x].count() > 0:
+                if sort_values:
+                    df_chart = df_chart.sort_values(by=x)
+                fig = px.line(df_chart, x=x, y=y, title=title, markers=True,
+                              color_discrete_sequence=px.colors.qualitative.Pastel)
+            else:
+                st.info(f"Tidak ada data yang cukup untuk membuat grafik garis '{title}'.")
+                return
         elif chart_type == "bar":
-            if top_n:
-                # Pastikan ada cukup data untuk top_n
-                if not df_chart.empty and y in df_chart.columns:
-                    df_chart = df_chart.nlargest(top_n, y, keep='first') # Ambil N teratas
-                else:
-                    st.warning(f"Tidak dapat membuat grafik '{title}': Data kosong atau kolom '{y}' tidak ada.")
-                    return # Keluar dari fungsi jika data tidak valid
-            fig = px.bar(df_chart, x=x, y=y, title=title,
-                         color_discrete_sequence=px.colors.qualitative.Pastel)
+            # Memastikan kolom 'x' dan 'y' ada dan tidak kosong
+            if x in df_chart.columns and y in df_chart.columns and not df_chart.empty and df_chart[x].count() > 0:
+                if top_n:
+                    # Ambil N teratas, pastikan ada cukup data
+                    if len(df_chart) > 0:
+                        df_chart = df_chart.nlargest(top_n, y, keep='first')
+                    else:
+                        st.info(f"Tidak ada cukup data untuk mengambil {top_n} teratas untuk grafik batang '{title}'.")
+                        return
+                fig = px.bar(df_chart, x=x, y=y, title=title,
+                             color_discrete_sequence=px.colors.qualitative.Pastel)
+            else:
+                st.info(f"Tidak ada data yang cukup untuk membuat grafik batang '{title}'.")
+                return
         
         if fig:
             fig.update_layout(
@@ -205,13 +222,21 @@ if uploaded_file is not None:
             st.sidebar.header("Filter Data")
 
             selected_platform = st.sidebar.selectbox("Platform", all_platforms)
-            selected_sentiment = st.sidebar.selectbox("Sentimen", ["Semua Sentimen", "Positive", "Neutral", "Negative"])
+            
+            # Pastikan kolom 'Sentiment' ada sebelum membuat selectbox
+            if 'Sentiment' in cleaned_df.columns:
+                sentiment_options = ["Semua Sentimen"] + list(cleaned_df['Sentiment'].unique())
+                selected_sentiment = st.sidebar.selectbox("Sentimen", sentiment_options)
+            else:
+                selected_sentiment = "Semua Sentimen" # Default jika kolom tidak ada
+                st.sidebar.warning("Kolom 'Sentiment' tidak ditemukan, filter sentimen dinonaktifkan.")
+
             selected_media_type = st.sidebar.selectbox("Tipe Media", all_media_types)
             selected_location = st.sidebar.selectbox("Lokasi", all_locations)
 
             # Inisialisasi tanggal default
-            min_date_val = cleaned_df['Date'].min().date() if not cleaned_df.empty and 'Date' in cleaned_df.columns else None
-            max_date_val = cleaned_df['Date'].max().date() if not cleaned_df.empty and 'Date' in cleaned_df.columns else None
+            min_date_val = cleaned_df['Date'].min().date() if not cleaned_df.empty and 'Date' in cleaned_df.columns and not cleaned_df['Date'].isnull().all() else None
+            max_date_val = cleaned_df['Date'].max().date() if not cleaned_df.empty and 'Date' in cleaned_df.columns and not cleaned_df['Date'].isnull().all() else None
 
             col1, col2 = st.sidebar.columns(2)
             with col1:
@@ -262,15 +287,12 @@ if uploaded_file is not None:
                 with col1:
                     st.markdown('<div class="chart-box">', unsafe_allow_html=True)
                     st.subheader("Sentiment Breakdown")
-                    if 'Sentiment' in filtered_df.columns:
+                    if 'Sentiment' in filtered_df.columns and not filtered_df.empty and filtered_df['Sentiment'].count() > 0:
                         sentiment_counts = filtered_df['Sentiment'].value_counts().reset_index()
                         sentiment_counts.columns = ['Sentiment', 'Count']
-                        if not sentiment_counts.empty:
-                            create_chart("pie", sentiment_counts, names='Sentiment', title="Distribusi Sentimen")
-                        else:
-                            st.info("Tidak ada data sentimen setelah filter.")
+                        create_chart("pie", sentiment_counts, names='Sentiment', title="Distribusi Sentimen")
                     else:
-                        st.info("Kolom 'Sentiment' tidak tersedia.")
+                        st.info("Tidak ada data sentimen yang valid setelah filter.")
                     st.markdown(
                         """
                         <div class="insights-box">
@@ -288,14 +310,11 @@ if uploaded_file is not None:
                 with col2:
                     st.markdown('<div class="chart-box">', unsafe_allow_html=True)
                     st.subheader("Platform Engagements")
-                    if 'Platform' in filtered_df.columns and 'Engagements' in filtered_df.columns:
+                    if 'Platform' in filtered_df.columns and 'Engagements' in filtered_df.columns and not filtered_df.empty and filtered_df['Platform'].count() > 0:
                         platform_engagements = filtered_df.groupby('Platform')['Engagements'].sum().reset_index()
-                        if not platform_engagements.empty:
-                            create_chart("bar", platform_engagements, x='Platform', y='Engagements', title="Total Engagement per Platform")
-                        else:
-                            st.info("Tidak ada data platform engagement setelah filter.")
+                        create_chart("bar", platform_engagements, x='Platform', y='Engagements', title="Total Engagement per Platform")
                     else:
-                        st.info("Kolom 'Platform' atau 'Engagements' tidak tersedia.")
+                        st.info("Tidak ada data platform engagement yang valid setelah filter.")
                     st.markdown(
                         """
                         <div class="insights-box">
@@ -313,15 +332,12 @@ if uploaded_file is not None:
                 # Baris 2: Engagement Trend over Time
                 st.markdown('<div class="chart-box">', unsafe_allow_html=True)
                 st.subheader("Engagement Trend over Time")
-                if 'Date' in filtered_df.columns and 'Engagements' in filtered_df.columns:
+                if 'Date' in filtered_df.columns and 'Engagements' in filtered_df.columns and not filtered_df.empty and filtered_df['Date'].count() > 0:
                     engagement_trend = filtered_df.groupby(pd.Grouper(key='Date', freq='D'))['Engagements'].sum().reset_index()
                     engagement_trend.columns = ['Date', 'Total Engagements']
-                    if not engagement_trend.empty:
-                        create_chart("line", engagement_trend, x='Date', y='Total Engagements', title="Tren Engagement dari Waktu ke Waktu", sort_values=True)
-                    else:
-                        st.info("Tidak ada data tren engagement setelah filter.")
+                    create_chart("line", engagement_trend, x='Date', y='Total Engagements', title="Tren Engagement dari Waktu ke Waktu", sort_values=True)
                 else:
-                    st.info("Kolom 'Date' atau 'Engagements' tidak tersedia.")
+                    st.info("Tidak ada data tren engagement yang valid setelah filter.")
                 st.markdown(
                     """
                     <div class="insights-box">
@@ -342,15 +358,12 @@ if uploaded_file is not None:
                 with col3:
                     st.markdown('<div class="chart-box">', unsafe_allow_html=True)
                     st.subheader("Media Type Mix")
-                    if 'MediaType' in filtered_df.columns:
+                    if 'MediaType' in filtered_df.columns and not filtered_df.empty and filtered_df['MediaType'].count() > 0:
                         media_type_counts = filtered_df['MediaType'].value_counts().reset_index()
                         media_type_counts.columns = ['MediaType', 'Count']
-                        if not media_type_counts.empty:
-                            create_chart("pie", media_type_counts, names='MediaType', title="Proporsi Tipe Media")
-                        else:
-                            st.info("Tidak ada data tipe media setelah filter.")
+                        create_chart("pie", media_type_counts, names='MediaType', title="Proporsi Tipe Media")
                     else:
-                        st.info("Kolom 'MediaType' tidak tersedia.")
+                        st.info("Tidak ada data tipe media yang valid setelah filter.")
                     st.markdown(
                         """
                         <div class="insights-box">
@@ -368,14 +381,11 @@ if uploaded_file is not None:
                 with col4:
                     st.markdown('<div class="chart-box">', unsafe_allow_html=True)
                     st.subheader("Top 5 Locations by Engagement")
-                    if 'Location' in filtered_df.columns and 'Engagements' in filtered_df.columns:
+                    if 'Location' in filtered_df.columns and 'Engagements' in filtered_df.columns and not filtered_df.empty and filtered_df['Location'].count() > 0:
                         location_engagements = filtered_df.groupby('Location')['Engagements'].sum().reset_index()
-                        if not location_engagements.empty:
-                            create_chart("bar", location_engagements, x='Location', y='Engagements', title="Top 5 Lokasi berdasarkan Engagement", top_n=5)
-                        else:
-                            st.info("Tidak ada data lokasi setelah filter.")
+                        create_chart("bar", location_engagements, x='Location', y='Engagements', title="Top 5 Lokasi berdasarkan Engagement", top_n=5)
                     else:
-                        st.info("Kolom 'Location' atau 'Engagements' tidak tersedia.")
+                        st.info("Tidak ada data lokasi yang valid setelah filter.")
                     st.markdown(
                         """
                         <div class="insights-box">
@@ -390,6 +400,8 @@ if uploaded_file is not None:
                     )
                     st.markdown('</div>', unsafe_allow_html=True)
 
+    except pd.errors.EmptyDataError:
+        st.error("File CSV yang diunggah kosong. Harap unggah file yang berisi data.")
     except Exception as e:
         st.error(f"Terjadi kesalahan saat memproses file CSV: {e}")
         st.info("Mohon pastikan file CSV Anda memiliki format yang benar dan kolom-kolom yang diharapkan: `Date`, `Platform`, `Sentiment`, `MediaType`, `Location`, `Engagements`.")
