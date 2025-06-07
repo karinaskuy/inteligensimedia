@@ -1,0 +1,5 @@
+streamlit==1.34.0
+pandas==2.2.2
+plotly==5.22.0
+
+memindahkan requirements.txt ke root
