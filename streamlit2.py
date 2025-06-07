@@ -3,9 +3,10 @@ import pandas as pd
 import plotly.express as px
 import datetime
 
-cd karinaskuy\inteligensimedia\requierements.txt
+cd C:\inteligensimedia dir
 
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 
 # --- Konfigurasi Halaman ---
 st.set_page_config(
