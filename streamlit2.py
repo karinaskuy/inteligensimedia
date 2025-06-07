@@ -4,6 +4,7 @@ import plotly.express as px
 import datetime
 
 cd karinaskuy\inteligensimedia\requierements.txt
+
 pip install -r requirements.txt
 
 # --- Konfigurasi Halaman ---
